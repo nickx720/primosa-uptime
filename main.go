@@ -128,7 +128,15 @@ func sendTelegramMessage(text string, replyToMessageID int64) {
 		var buf bytes.Buffer
 		buf.ReadFrom(resp.Body)
 		fmt.Fprintf(os.Stderr, "Telegram send failed: %d %s\n", resp.StatusCode, buf.String())
+		return
 	}
+	var sent struct {
+		Result struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&sent)
+	fmt.Printf("Telegram: sent message_id=%d\n", sent.Result.MessageID)
 }
 
 // telegramMessage and telegramUpdate mirror the small subset of the
