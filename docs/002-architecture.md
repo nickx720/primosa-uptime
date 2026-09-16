@@ -37,7 +37,7 @@ Each target has a status of `up` or `down`. `checked_at` updates on
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Unknown: first run seeds state, no alert
+    [*] --> Unknown: first run seeds state
     Unknown --> Up: first check succeeds
     Unknown --> Down: first check fails (after retry)
     Up --> Down: 2 consecutive failed attempts
@@ -50,12 +50,27 @@ stateDiagram-v2
   `checkOnce` fails, a `retryDelay` (10s) wait, and a second `checkOnce`
   also fails. This absorbs a single transient blip so it never becomes
   an alert — the core flap-avoidance mechanism.
-- **Alert only on transition**: a Telegram message is sent only when
-  `newStatus != prev.Status`. Steady `up` or steady `down` across runs
-  is silent.
-- **First sighting is silent**: a target with no prior entry in
-  `state.json` gets seeded without an alert, so adding a target never
-  itself produces a message.
+- **Alert only on transition**: a per-target Telegram message is sent
+  only when `newStatus != prev.Status`. Steady `up` or steady `down`
+  across runs is silent.
+- **First sighting produces one summary message, not silence**: a
+  target with no prior entry in `state.json` is seeded without a
+  per-target up/down alert, but every first-seen target from a run is
+  collected and reported in a single Telegram message
+  (`formatFirstSeenSummary` in `main.go`) — never one message per
+  target. If every target in the run is first-seen (a brand-new
+  `state.json`), the message uses a "👋 Uptime monitoring started"
+  header followed by one line per target (✅/❌ + status, with a short
+  down reason e.g. `down (404)` or `down (timeout)`). If only some
+  targets are first-seen (a target added later), it uses a "👋 now
+  monitoring" header instead — collapsed to a single line
+  (`👋 now monitoring <name> — up`) when exactly one target is new.
+- **`UPTIME_RESET`**: when this env var is set (non-empty), the run
+  ignores any existing `state.json` and treats every target as
+  first-seen, so the summary message can be re-sent on demand. Set via
+  the `reset` boolean input on the `workflow_dispatch` trigger, which
+  the workflow only passes through to `docker run` as
+  `-e UPTIME_RESET=1` when true — scheduled runs never set it.
 - **`Since` drives duration**: preserved across unchanged polls, reset
   only on a transition; used to compute the "back UP after Nm/Nh/Nd"
   message.

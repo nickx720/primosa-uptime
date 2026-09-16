@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,15 @@ type State struct {
 
 type checkResult struct {
 	ok     bool
+	detail string
+}
+
+// firstSeenEntry is a target with no prior state.json entry, collected
+// during a run so a single summary message can be sent instead of one
+// per target.
+type firstSeenEntry struct {
+	name   string
+	status string
 	detail string
 }
 
@@ -99,6 +109,49 @@ func sendTelegram(text string) {
 		buf.ReadFrom(resp.Body)
 		fmt.Fprintf(os.Stderr, "Telegram send failed: %d %s\n", resp.StatusCode, buf.String())
 	}
+}
+
+// shortDownReason trims the "status " prefix off a check detail (e.g.
+// "status 404" -> "404") so summary lines read "down (404)"; other
+// details (e.g. "timeout", a raw error string) pass through unchanged.
+func shortDownReason(detail string) string {
+	if code, ok := strings.CutPrefix(detail, "status "); ok {
+		return code
+	}
+	return detail
+}
+
+func formatStatusLine(e firstSeenEntry) string {
+	if e.status == "down" {
+		return fmt.Sprintf("%s — down (%s)", e.name, shortDownReason(e.detail))
+	}
+	return fmt.Sprintf("%s — up", e.name)
+}
+
+// formatFirstSeenSummary builds the one Telegram message covering every
+// target seen for the first time this run. If every target is
+// first-seen (a brand new repo/state.json) it uses the "started"
+// header; otherwise (a target added later) it uses "now monitoring",
+// collapsed to one line when only a single target is new.
+func formatFirstSeenSummary(entries []firstSeenEntry, totalTargets int) string {
+	allFirstSeen := len(entries) == totalTargets
+	if len(entries) == 1 && !allFirstSeen {
+		return fmt.Sprintf("\U0001F44B now monitoring %s", formatStatusLine(entries[0]))
+	}
+
+	header := "\U0001F44B now monitoring"
+	if allFirstSeen {
+		header = "\U0001F44B Uptime monitoring started"
+	}
+	lines := []string{header}
+	for _, e := range entries {
+		emoji := "✅"
+		if e.status == "down" {
+			emoji = "❌"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s", emoji, formatStatusLine(e)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatDuration(sinceISO string) string {
@@ -159,9 +212,16 @@ func run() {
 		return
 	}
 	state := loadState()
+	if os.Getenv("UPTIME_RESET") != "" {
+		// Treat every target as first-seen so the "now monitoring"
+		// summary can be re-sent on demand.
+		state = State{Targets: map[string]TargetState{}}
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	state.CheckedAt = now
+
+	var firstSeen []firstSeenEntry
 
 	for _, target := range targets {
 		result := checkTarget(target)
@@ -173,6 +233,7 @@ func run() {
 
 		if !seen {
 			state.Targets[target.Name] = TargetState{Status: newStatus, Since: now}
+			firstSeen = append(firstSeen, firstSeenEntry{name: target.Name, status: newStatus, detail: result.detail})
 			continue
 		}
 
@@ -186,6 +247,10 @@ func run() {
 			state.Targets[target.Name] = TargetState{Status: newStatus, Since: now}
 		}
 		// unchanged: leave state as-is (keep original Since)
+	}
+
+	if len(firstSeen) > 0 {
+		sendTelegram(formatFirstSeenSummary(firstSeen, len(targets)))
 	}
 
 	if err := saveState(state); err != nil {

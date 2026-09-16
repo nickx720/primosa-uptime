@@ -7,6 +7,9 @@ to a Telegram group on up/down transitions only.
 ## Add a target
 
 Edit `targets.json`, add `{ "name": "...", "url": "https://...", "expect": 200 }`.
+A newly added target is checked immediately and reported in a one-line
+"👋 now monitoring" Telegram message on its first run, rather than staying
+silent until it later flips status.
 
 ## Set up the Telegram bot (group chat)
 
@@ -31,6 +34,15 @@ In the repo's Settings > Secrets and variables > Actions, add:
 - Scheduled workflows on a repo with no activity for 60 days get
   auto-disabled by GitHub. The `state.json` commits count as activity, so
   the workflow keeps itself alive as long as it keeps running.
+
+## Re-sending the "now monitoring" summary
+
+Manual trigger only: Actions tab > uptime > Run workflow > check `reset`.
+This ignores the existing `state.json` for that run — every target is
+treated as first-seen, so the full status summary is sent again to
+Telegram (useful for confirming the alert path end to end without
+waiting for a real transition). It does not delete `state.json`; the run
+just overwrites it with fresh first-seen entries, same as any other run.
 
 ## Local dry-run
 

@@ -3,7 +3,12 @@ name: uptime
 on:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      reset:
+        description: 'Ignore existing state.json (treat every target as first-seen) and resend the "now monitoring" summary'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,9 +32,14 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RESET: ${{ github.event_name == 'workflow_dispatch' && inputs.reset }}
         run: |
+          RESET_FLAG=""
+          if [ "$RESET" = "true" ]; then
+            RESET_FLAG="-e UPTIME_RESET=1"
+          fi
           docker run --rm -v "$PWD:/data" -w /data \
-            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID \
+            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID $RESET_FLAG \
             primosa-uptime
 
       - name: Commit state if changed
