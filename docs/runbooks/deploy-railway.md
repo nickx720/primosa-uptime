@@ -18,9 +18,14 @@ code change — there is no separate config store.
 - Volume `pinger-volume` (`d5e3b9c5-22d5-4d84-8a1c-85dda21cb9f4`) mounted at `/data`
 - Public domain: https://pinger-production-3ee7.up.railway.app
   (`PINGER_HEALTHZ_URL` repo variable = `https://pinger-production-3ee7.up.railway.app/healthz`)
-- Source: GitHub `nickx720/primosa-uptime` branch `main` — every push to
-  `main` auto-deploys (Dockerfile build). `railway up` still works for an
-  ad-hoc deploy of the working tree but is not needed for normal changes.
+- Source: GitHub `nickx720/primosa-uptime` branch `main` (Dockerfile build).
+  **Push-to-deploy is NOT active yet**: the Railway GitHub App has no
+  access to this repo, so Railway can clone it (public) but cannot create
+  a push trigger. Owner: https://github.com/apps/railway-app → Configure →
+  add `primosa-uptime`, then in the Railway dashboard open the `pinger`
+  service → Settings → Source and confirm branch `main` (that creates the
+  trigger). Until then, deploy with `railway up` from the repo root, or
+  Redeploy from the dashboard.
 
 To link a fresh checkout: `railway link --project 24001f00-baf1-4016-a19a-9f478ef5ba4b`
 then `railway service link pinger`.
@@ -67,7 +72,8 @@ and deploy (`restartPolicyType: ALWAYS`, health check on `/healthz`,
 ```sh
 git add targets.json
 git commit -m "targets: add <service>"
-git push            # push to main auto-deploys; `railway up` only if you need to skip git
+git push
+railway up          # until push-to-deploy is active (see above)
 ```
 
 ## Verifying it's live
