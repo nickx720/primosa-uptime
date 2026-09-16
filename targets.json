@@ -12,7 +12,7 @@
   },
   {
     "name": "Watermark",
-    "url": "https://watermark.primosa.ai/healthz",
+    "url": "https://watermark.primosa.ai/health/ready",
     "expect": 200
   }
 ]
