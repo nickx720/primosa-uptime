@@ -389,6 +389,17 @@ func run() {
 	var firstSeen []firstSeenEntry
 	results := map[string]checkResult{}
 
+	// Drop state for targets no longer in targets.json so they don't linger.
+	wanted := map[string]bool{}
+	for _, target := range targets {
+		wanted[target.Name] = true
+	}
+	for name := range state.Targets {
+		if !wanted[name] {
+			delete(state.Targets, name)
+		}
+	}
+
 	for _, target := range targets {
 		result := checkTarget(target)
 		results[target.Name] = result

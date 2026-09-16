@@ -10,7 +10,11 @@ and the same cron run answers it (up to a ~5 minute lag — see below).
 Edit `targets.json`, add `{ "name": "...", "url": "https://...", "expect": 200 }`.
 A newly added target is checked immediately and reported in a one-line
 "👋 now monitoring" Telegram message on its first run, rather than staying
-silent until it later flips status.
+silent until it later flips status. Removing a target drops it from
+`state.json` on the next run.
+
+`pol.primosa.ai` (Proof of Life production) is intentionally absent until prod
+is promoted; re-add it then.
 
 ## Set up the Telegram bot (group chat)
 

@@ -1,6 +1,17 @@
 [
-  { "name": "Proof of Life (staging)", "url": "https://pol-stg.primosa.ai/health", "expect": 200 },
-  { "name": "Proof of Life", "url": "https://pol.primosa.ai/health", "expect": 200 },
-  { "name": "Unsub", "url": "https://unsub.primosa.ai/healthz", "expect": 200 },
-  { "name": "Watermark", "url": "https://watermark.primosa.ai/healthz", "expect": 200 }
+  {
+    "name": "Proof of Life (staging)",
+    "url": "https://pol-stg.primosa.ai/health",
+    "expect": 200
+  },
+  {
+    "name": "Unsub",
+    "url": "https://unsub.primosa.ai/healthz",
+    "expect": 200
+  },
+  {
+    "name": "Watermark",
+    "url": "https://watermark.primosa.ai/healthz",
+    "expect": 200
+  }
 ]
