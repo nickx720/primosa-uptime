@@ -34,8 +34,13 @@ In the repo's Settings > Secrets and variables > Actions, add:
 
 ## Local dry-run
 
-Without the two env vars set, messages are printed to stdout instead of sent:
+Runs in Docker (matches how CI runs it — Go stdlib only, no local Go
+toolchain required). Without the two env vars set, messages are printed
+to stdout instead of sent:
 
 ```
-npm run check
+make run
 ```
+
+`make lint` runs `gofmt`/`go vet` locally if you have Go installed;
+`make build` just builds the image.

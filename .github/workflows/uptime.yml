@@ -16,15 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - name: Lint
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src golang:1.26-alpine sh -c 'test -z "$(gofmt -l .)" && go vet ./...'
+
+      - name: Build image
+        run: docker build -t primosa-uptime .
 
       - name: Run uptime check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node check.mjs
+        run: |
+          docker run --rm -v "$PWD:/data" -w /data \
+            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID \
+            primosa-uptime
 
       - name: Commit state if changed
         run: |
