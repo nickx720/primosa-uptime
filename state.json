@@ -1,21 +1,21 @@
 {
-  "checked_at": "2026-09-16T18:14:32Z",
+  "checked_at": "2026-09-16T18:28:05Z",
   "targets": {
     "Proof of Life": {
       "status": "down",
-      "since": "2026-09-16T18:14:32Z"
+      "since": "2026-09-16T18:28:05Z"
     },
     "Proof of Life (staging)": {
       "status": "up",
-      "since": "2026-09-16T18:14:32Z"
+      "since": "2026-09-16T18:28:05Z"
     },
     "Unsub": {
       "status": "down",
-      "since": "2026-09-16T18:14:32Z"
+      "since": "2026-09-16T18:28:05Z"
     },
     "Watermark": {
       "status": "down",
-      "since": "2026-09-16T18:14:32Z"
+      "since": "2026-09-16T18:28:05Z"
     }
   }
 }
