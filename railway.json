@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "DOCKERFILE"
+  },
+  "deploy": {
+    "restartPolicyType": "ALWAYS",
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 60
+  }
+}

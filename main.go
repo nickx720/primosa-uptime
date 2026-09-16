@@ -2,11 +2,16 @@
 // Node/deps-free by design: Go stdlib only. Reads targets.json, checks each
 // with a retry to avoid flapping, diffs against state.json, sends a
 // Telegram message on up<->down transitions, and writes state.json back.
-// Always exits 0.
+//
+// One-shot mode (default, used by the GitHub watchdog path and local
+// dry-runs) runs a single check cycle and exits 0. Loop mode (UPTIME_LOOP
+// set, used by the always-on Railway service) runs the same cycle on a
+// ticker and serves /healthz over HTTP until SIGTERM.
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +19,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -23,8 +32,19 @@ const (
 	timeout     = 15 * time.Second
 	retryDelay  = 10 * time.Second
 	targetsFile = "targets.json"
-	stateFile   = "state.json"
 )
+
+// stateFile is the path state.json is read from / written to. Overridable
+// via STATE_PATH (e.g. /data/state.json on a Railway volume); defaults to
+// the current directory, matching the pre-loop-mode behavior.
+var stateFile = envOrDefault("STATE_PATH", "state.json")
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 type Target struct {
 	Name   string `json:"name"`
@@ -385,11 +405,15 @@ func saveState(state State) error {
 	return os.WriteFile(stateFile, data, 0o644)
 }
 
-func run() {
+// run executes one check cycle: load targets, check each, alert on
+// transitions, poll for /status, and persist state. It returns a
+// name->status snapshot for the /healthz endpoint in loop mode; one-shot
+// callers ignore the return value.
+func run() map[string]string {
 	targets, err := loadTargets()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Uptime check failed unexpectedly: %v\n", err)
-		return
+		return nil
 	}
 	state := loadState()
 	if os.Getenv("UPTIME_RESET") != "" {
@@ -452,9 +476,137 @@ func run() {
 	if err := saveState(state); err != nil {
 		fmt.Fprintf(os.Stderr, "Uptime check failed unexpectedly: %v\n", err)
 	}
+
+	snapshot := make(map[string]string, len(state.Targets))
+	for name, ts := range state.Targets {
+		snapshot[name] = ts.Status
+	}
+	return snapshot
+}
+
+// cycleGuard prevents overlapping check cycles in loop mode: if a tick
+// fires while the previous cycle is still running (e.g. slow target
+// responses stacking up near the tick interval), it is skipped rather
+// than run concurrently, which could race on state.json.
+type cycleGuard struct{ running atomic.Bool }
+
+func (g *cycleGuard) tryStart() bool { return g.running.CompareAndSwap(false, true) }
+func (g *cycleGuard) done()          { g.running.Store(false) }
+
+// healthStatus is the shared state /healthz reports, updated after every
+// completed check cycle in loop mode.
+type healthStatus struct {
+	mu         sync.Mutex
+	lastLoopAt time.Time
+	targets    map[string]string
+}
+
+func (h *healthStatus) update(at time.Time, targets map[string]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lastLoopAt = at
+	h.targets = targets
+}
+
+func (h *healthStatus) snapshot() (time.Time, map[string]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	targets := make(map[string]string, len(h.targets))
+	for k, v := range h.targets {
+		targets[k] = v
+	}
+	return h.lastLoopAt, targets
+}
+
+// isHealthy reports whether lastLoopAt is recent enough given the loop
+// interval. A zero lastLoopAt (no cycle has completed yet) is unhealthy.
+func isHealthy(lastLoopAt time.Time, interval time.Duration, now time.Time) bool {
+	if lastLoopAt.IsZero() {
+		return false
+	}
+	return now.Sub(lastLoopAt) <= 3*interval
+}
+
+// healthzHandler serves GET /healthz: 200 when the last completed loop is
+// recent, 503 when it's stale or hasn't happened yet.
+func healthzHandler(h *healthStatus, interval time.Duration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		lastLoopAt, targets := h.snapshot()
+		ok := isHealthy(lastLoopAt, interval, time.Now())
+
+		resp := map[string]any{"ok": ok, "targets": targets}
+		if !lastLoopAt.IsZero() {
+			resp["last_loop_at"] = lastLoopAt.Format(time.RFC3339)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// runLoop runs one check cycle immediately, then one per interval tick,
+// until ctx is cancelled. A tick that fires while the previous cycle is
+// still running is skipped, never run concurrently.
+func runLoop(ctx context.Context, interval time.Duration, h *healthStatus) {
+	var guard cycleGuard
+	cycle := func() {
+		if !guard.tryStart() {
+			fmt.Fprintln(os.Stderr, "uptime: skipping tick, previous cycle still running")
+			return
+		}
+		defer guard.done()
+		targets := run()
+		h.update(time.Now().UTC(), targets)
+	}
+
+	cycle()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cycle()
+		}
+	}
 }
 
 func main() {
-	run()
-	os.Exit(0)
+	loopStr := os.Getenv("UPTIME_LOOP")
+	if loopStr == "" {
+		run()
+		os.Exit(0)
+	}
+
+	interval, err := time.ParseDuration(loopStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid UPTIME_LOOP %q: %v\n", loopStr, err)
+		os.Exit(1)
+	}
+
+	port := envOrDefault("PORT", "8080")
+	h := &healthStatus{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", healthzHandler(h, interval))
+	srv := &http.Server{Addr: ":" + port, Handler: mux}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "healthz server error: %v\n", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	runLoop(ctx, interval, h)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
 }

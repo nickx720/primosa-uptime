@@ -105,6 +105,40 @@ func TestFormatDurationHM(t *testing.T) {
 	}
 }
 
+func TestIsHealthy(t *testing.T) {
+	now := time.Date(2026, 9, 16, 18, 40, 0, 0, time.UTC)
+	interval := 60 * time.Second
+	cases := []struct {
+		name       string
+		lastLoopAt time.Time
+		want       bool
+	}{
+		{"never run", time.Time{}, false},
+		{"just ran", now, true},
+		{"within 3x interval", now.Add(-179 * time.Second), true},
+		{"stale beyond 3x interval", now.Add(-181 * time.Second), false},
+	}
+	for _, c := range cases {
+		if got := isHealthy(c.lastLoopAt, interval, now); got != c.want {
+			t.Errorf("%s: isHealthy() = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestCycleGuard_SkipsWhenBusy(t *testing.T) {
+	var g cycleGuard
+	if !g.tryStart() {
+		t.Fatal("expected first tryStart to succeed")
+	}
+	if g.tryStart() {
+		t.Fatal("expected second tryStart to fail while a cycle is running")
+	}
+	g.done()
+	if !g.tryStart() {
+		t.Fatal("expected tryStart to succeed again after done()")
+	}
+}
+
 func TestFormatStatusReply(t *testing.T) {
 	now := time.Date(2026, 9, 16, 18, 40, 0, 0, time.UTC)
 	targets := []Target{

@@ -1,0 +1,15 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint + test
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src golang:1.26-alpine sh -c 'test -z "$(gofmt -l .)" && go vet ./... && go test ./...'

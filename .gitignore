@@ -2,3 +2,4 @@
 execution.json
 /primosa-uptime
 *.out
+state.json

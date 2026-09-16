@@ -9,8 +9,11 @@
 3. Optionally dry-run locally to sanity-check the URL resolves and
    responds: `make run` (no Telegram secrets needed — prints
    `[dry-run]` lines instead of sending).
-4. Commit and push. The next scheduled run (or a manual
-   `workflow_dispatch`) will seed the new target in `state.json` on its
-   first check — this is silent, no alert fires for the initial seed.
+4. Commit and push, then redeploy the Railway service (`railway up` —
+   see `docs/runbooks/deploy-railway.md`). `targets.json` is baked into
+   the Docker image at build time, so a new target only takes effect
+   after a redeploy, not automatically. The next loop cycle seeds the
+   new target in `state.json` on its first check — this is silent, no
+   alert fires for the initial seed.
 5. Update `execution.json`'s `targets` list to keep session state in
    sync (not required for the workflow itself, just for continuity).
