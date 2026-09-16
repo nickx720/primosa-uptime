@@ -8,6 +8,23 @@ and `docs/002-architecture.md`.
 Editing it means committing + redeploying (`railway up`), same as any other
 code change — there is no separate config store.
 
+## Live deployment (as of 2026-09-16)
+
+- Railway project `primosa-uptime` (workspace "Nick's Projects"):
+  `24001f00-baf1-4016-a19a-9f478ef5ba4b`
+  https://railway.com/project/24001f00-baf1-4016-a19a-9f478ef5ba4b
+- Environment `production`: `6f47b978-5a2f-46eb-8484-6b4d48e75bc9`
+- Service `pinger`: `6d2051ea-9dd8-461d-9add-ee7022c4951d`
+- Volume `pinger-volume` (`d5e3b9c5-22d5-4d84-8a1c-85dda21cb9f4`) mounted at `/data`
+- Public domain: https://pinger-production-3ee7.up.railway.app
+  (`PINGER_HEALTHZ_URL` repo variable = `https://pinger-production-3ee7.up.railway.app/healthz`)
+- Source: GitHub `nickx720/primosa-uptime` branch `main` — every push to
+  `main` auto-deploys (Dockerfile build). `railway up` still works for an
+  ad-hoc deploy of the working tree but is not needed for normal changes.
+
+To link a fresh checkout: `railway link --project 24001f00-baf1-4016-a19a-9f478ef5ba4b`
+then `railway service link pinger`.
+
 ## One-time setup
 
 Run these from the repo root. Do not run them yourself as an agent —
@@ -50,8 +67,7 @@ and deploy (`restartPolicyType: ALWAYS`, health check on `/healthz`,
 ```sh
 git add targets.json
 git commit -m "targets: add <service>"
-git push
-railway up
+git push            # push to main auto-deploys; `railway up` only if you need to skip git
 ```
 
 ## Verifying it's live
