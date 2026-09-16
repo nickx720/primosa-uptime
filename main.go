@@ -30,6 +30,8 @@ type Target struct {
 	Name   string `json:"name"`
 	URL    string `json:"url"`
 	Expect int    `json:"expect"`
+	// Enabled: nil or true = monitored; false = listed but skipped ("commented out").
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 type TargetState struct {
@@ -340,9 +342,15 @@ func loadTargets() ([]Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	var targets []Target
-	if err := json.Unmarshal(data, &targets); err != nil {
+	var all []Target
+	if err := json.Unmarshal(data, &all); err != nil {
 		return nil, err
+	}
+	targets := all[:0]
+	for _, t := range all {
+		if t.Enabled == nil || *t.Enabled {
+			targets = append(targets, t)
+		}
 	}
 	return targets, nil
 }

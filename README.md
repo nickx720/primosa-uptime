@@ -11,7 +11,8 @@ Edit `targets.json`, add `{ "name": "...", "url": "https://...", "expect": 200 }
 A newly added target is checked immediately and reported in a one-line
 "👋 now monitoring" Telegram message on its first run, rather than staying
 silent until it later flips status. Removing a target drops it from
-`state.json` on the next run.
+`state.json` on the next run. To park a target without deleting it, set
+`"enabled": false` (JSON has no comments) — it is skipped and pruned from state.
 
 `pol.primosa.ai` (Proof of Life production) is intentionally absent until prod
 is promoted; re-add it then.
