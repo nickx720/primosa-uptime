@@ -10,9 +10,9 @@ run: build
 		-e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID \
 		$(IMAGE)
 
-lint:
+lint: test
 	test -z "$$(gofmt -l .)"
 	go vet ./...
 
-test: build
-	docker run --rm -v "$(PWD):/data" -w /data $(IMAGE)
+test:
+	docker run --rm -v "$(PWD):/src" -w /src golang:1.26-alpine go test ./...

@@ -16,6 +16,9 @@ flowchart LR
     D --> R
     R -->|diff vs previous| E[state.json]
     R -->|on up/down transition only| F[Telegram group]
+    R -->|getUpdates since last_update_id| F
+    F -->|/status found?| R
+    R -->|one reply, this run's results| F
     R -->|git commit + push| E
 ```
 
@@ -30,10 +33,12 @@ days of inactivity.
 
 ## State machine
 
-`state.json` is `{ checked_at, targets: { <name>: { status, since } } }`.
+`state.json` is
+`{ checked_at, last_update_id, targets: { <name>: { status, since } } }`.
 Each target has a status of `up` or `down`. `checked_at` updates on
 *every* run regardless of whether any target transitioned — see
-"heartbeat" below.
+"heartbeat" below. `last_update_id` drives `/status` command polling —
+see below.
 
 ```mermaid
 stateDiagram-v2
@@ -80,3 +85,44 @@ stateDiagram-v2
   that, GitHub auto-disables the schedule even though it's running fine.
   `checked_at` guarantees a commit (hence "repo activity") on every run.
   See `docs/003-approach-review.md`.
+
+## `/status` command polling
+
+There is no always-on process listening for Telegram messages — the
+existing 5-minute cron run doubles as the poller, so a reply lags the
+actual `/status` message by up to 5 minutes (the cron cadence).
+
+- **After the health checks**, if both Telegram env vars are set, the
+  run calls `getUpdates` with `offset = last_update_id + 1`,
+  `timeout=0` (no long-polling — this is a one-shot process, not a
+  server), `limit=100`, and `allowed_updates=["message"]`.
+- It scans the returned updates for messages in `TELEGRAM_CHAT_ID` whose
+  text starts with `/status` (also matches `/status@primosa_uptime_bot`,
+  which Telegram appends in groups with multiple bots).
+- If at least one match is found, it replies **once**, to the latest
+  matching message (`reply_to_message_id`), with a business-level status
+  line per target from `targets.json` built from this run's fresh
+  results — never a stale/cached status:
+  ```
+  📊 Status — 2026-09-16 18:40 UTC
+  ✅ Proof of Life (staging) — up · 212 ms · up for 3h 12m
+  ❌ Proof of Life — down (404) · down for 1h 05m
+  ❌ Unsub — down (timeout) · down for 1h 05m
+  ```
+  Response time (`212 ms`) is measured around the HTTP call in
+  `checkOnce` and shown only on `up` lines; it's kept in-memory for this
+  run's reply only, not added to `state.json`. The "up for"/"down for"
+  duration comes from the same `since` state.json already tracks for
+  transitions, just formatted with minutes (`formatDurationHM`) instead
+  of the coarser day/hour rounding used for transition alerts.
+- **`last_update_id` always advances**, even when no `/status` command
+  was found in the batch — otherwise old messages would be re-answered
+  every run. It only moves forward (to the highest `update_id` seen),
+  never resets.
+- If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` aren't set, polling is
+  skipped entirely (consistent with the rest of the tool's dry-run
+  behavior — nothing is printed for this feature in dry-run).
+- **Telegram privacy mode**: a freshly created bot may not see the
+  `/status` message at all if BotFather's group privacy mode is left
+  enabled. See the README's BotFather setup step — disable
+  `/setprivacy` for the bot, or make it a group admin.

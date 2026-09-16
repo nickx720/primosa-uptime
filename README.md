@@ -2,7 +2,8 @@
 
 Free uptime monitoring for `*.primosa.ai` projects, independent of Railway/Fly.
 A GitHub Actions cron hits each target's health URL every ~5 minutes and posts
-to a Telegram group on up/down transitions only.
+to a Telegram group on up/down transitions only. Post `/status` in the group
+and the same cron run answers it (up to a ~5 minute lag — see below).
 
 ## Add a target
 
@@ -19,8 +20,28 @@ silent until it later flips status.
 4. Run `curl https://api.telegram.org/bot<TOKEN>/getUpdates` and find
    `message.chat.id` — for a group this is a negative number like `-100...`.
    That's `TELEGRAM_CHAT_ID`.
-5. No need to disable BotFather's `/setprivacy` — the bot only sends
-   messages, it never needs to read group messages.
+5. The bot now also needs to *read* group messages (to see `/status`).
+   Message [@BotFather](https://t.me/BotFather), pick your bot, run
+   `/setprivacy` → **Disable**. If you'd rather leave privacy mode on,
+   make the bot a group admin instead — either option lets it see
+   `/status` messages.
+
+## `/status` command
+
+Post `/status` (or `/status@primosa_uptime_bot`) in the Telegram group.
+There's no always-on bot process — the next scheduled cron run (within
+~5 minutes) notices the message and replies once, in-thread, with a
+status line per target using that run's fresh check results:
+
+```
+📊 Status — 2026-09-16 18:40 UTC
+✅ Proof of Life (staging) — up · 212 ms · up for 3h 12m
+❌ Proof of Life — down (404) · down for 1h 05m
+❌ Unsub — down (timeout) · down for 1h 05m
+```
+
+If the bot can't see the message at all, double check the BotFather
+privacy setting above.
 
 ## GitHub secrets
 
@@ -54,5 +75,6 @@ to stdout instead of sent:
 make run
 ```
 
-`make lint` runs `gofmt`/`go vet` locally if you have Go installed;
-`make build` just builds the image.
+`make lint` runs `go test` (in Docker), then `gofmt`/`go vet` locally if
+you have Go installed; `make test` runs just the Go tests, in Docker
+(no local Go toolchain required); `make build` just builds the image.

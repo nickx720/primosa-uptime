@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,13 +42,15 @@ type TargetState struct {
 // targets stay steady for 60+ days would produce no commits at all (see
 // docs/003-approach-review.md) and GitHub would auto-disable the schedule.
 type State struct {
-	CheckedAt string                 `json:"checked_at"`
-	Targets   map[string]TargetState `json:"targets"`
+	CheckedAt    string                 `json:"checked_at"`
+	Targets      map[string]TargetState `json:"targets"`
+	LastUpdateID int64                  `json:"last_update_id"`
 }
 
 type checkResult struct {
-	ok     bool
-	detail string
+	ok      bool
+	detail  string
+	latency time.Duration
 }
 
 // firstSeenEntry is a target with no prior state.json entry, collected
@@ -60,18 +64,20 @@ type firstSeenEntry struct {
 
 var httpClient = &http.Client{Timeout: timeout}
 
-func checkOnce(url string) checkResult {
-	resp, err := httpClient.Get(url)
+func checkOnce(targetURL string) checkResult {
+	start := time.Now()
+	resp, err := httpClient.Get(targetURL)
+	latency := time.Since(start)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return checkResult{ok: false, detail: "timeout"}
+			return checkResult{ok: false, detail: "timeout", latency: latency}
 		}
-		return checkResult{ok: false, detail: err.Error()}
+		return checkResult{ok: false, detail: err.Error(), latency: latency}
 	}
 	defer resp.Body.Close()
 	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
-	return checkResult{ok: ok, detail: fmt.Sprintf("status %d", resp.StatusCode)}
+	return checkResult{ok: ok, detail: fmt.Sprintf("status %d", resp.StatusCode), latency: latency}
 }
 
 func checkTarget(target Target) checkResult {
@@ -83,7 +89,15 @@ func checkTarget(target Target) checkResult {
 	return checkOnce(target.URL)
 }
 
+// sendTelegram sends a standalone (non-reply) message.
 func sendTelegram(text string) {
+	sendTelegramMessage(text, 0)
+}
+
+// sendTelegramMessage sends text to TELEGRAM_CHAT_ID, optionally as a reply
+// to replyToMessageID (0 means no reply). Falls back to printing when the
+// Telegram env vars aren't set (local dry-run).
+func sendTelegramMessage(text string, replyToMessageID int64) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("TELEGRAM_CHAT_ID")
 	if token == "" || chatID == "" {
@@ -91,14 +105,18 @@ func sendTelegram(text string) {
 		return
 	}
 
-	body, err := json.Marshal(map[string]string{"chat_id": chatID, "text": text})
+	payload := map[string]any{"chat_id": chatID, "text": text}
+	if replyToMessageID != 0 {
+		payload["reply_to_message_id"] = replyToMessageID
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Telegram send failed: %v\n", err)
 		return
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	resp, err := httpClient.Post(endpoint, "application/json", bytes.NewReader(body))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Telegram send failed: %v\n", err)
 		return
@@ -109,6 +127,85 @@ func sendTelegram(text string) {
 		buf.ReadFrom(resp.Body)
 		fmt.Fprintf(os.Stderr, "Telegram send failed: %d %s\n", resp.StatusCode, buf.String())
 	}
+}
+
+// telegramMessage and telegramUpdate mirror the small subset of the
+// Telegram Bot API's getUpdates response shape this tool needs.
+type telegramMessage struct {
+	MessageID int64 `json:"message_id"`
+	Chat      struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	Text string `json:"text"`
+}
+
+type telegramUpdate struct {
+	UpdateID int64            `json:"update_id"`
+	Message  *telegramMessage `json:"message"`
+}
+
+type telegramUpdatesResponse struct {
+	OK     bool             `json:"ok"`
+	Result []telegramUpdate `json:"result"`
+}
+
+// getUpdates polls Telegram for updates with update_id >= offset. It uses
+// timeout=0 (no long-polling — this runs once per 5-minute cron tick, not
+// as a persistent process) and restricts to message updates only.
+func getUpdates(offset int64) ([]telegramUpdate, error) {
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	q := url.Values{}
+	q.Set("offset", strconv.FormatInt(offset, 10))
+	q.Set("timeout", "0")
+	q.Set("limit", "100")
+	q.Set("allowed_updates", `["message"]`)
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?%s", token, q.Encode())
+
+	resp, err := httpClient.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var buf bytes.Buffer
+		buf.ReadFrom(resp.Body)
+		return nil, fmt.Errorf("getUpdates failed: %d %s", resp.StatusCode, buf.String())
+	}
+
+	var parsed telegramUpdatesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+	return parsed.Result, nil
+}
+
+// isStatusCommand reports whether a message text is a /status command,
+// with or without the @primosa_uptime_bot suffix Telegram appends in
+// group chats with multiple bots.
+func isStatusCommand(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "/status")
+}
+
+// findStatusCommand scans updates for the latest /status message in
+// chatID, and separately tracks the highest update_id seen across ALL
+// updates (regardless of chat or match) so the caller can always advance
+// past them — Telegram never re-delivers an update once it's been
+// acknowledged via a higher offset.
+func findStatusCommand(updates []telegramUpdate, chatID int64) (msg *telegramMessage, maxUpdateID int64, found bool) {
+	for _, u := range updates {
+		if u.UpdateID > maxUpdateID {
+			maxUpdateID = u.UpdateID
+		}
+		if u.Message == nil || u.Message.Chat.ID != chatID {
+			continue
+		}
+		if isStatusCommand(u.Message.Text) {
+			msg = u.Message
+			found = true
+		}
+	}
+	return msg, maxUpdateID, found
 }
 
 // shortDownReason trims the "status " prefix off a check detail (e.g.
@@ -171,6 +268,73 @@ func formatDuration(sinceISO string) string {
 	return fmt.Sprintf("%dd", days)
 }
 
+// formatDurationHM renders an ISO since-timestamp as "up for"/"down for"
+// text with a coarser format than formatDuration: "Nm" under an hour, else
+// "Nh 0Mm" (minutes zero-padded), matching the /status reply example.
+func formatDurationHM(sinceISO string, now time.Time) string {
+	since, err := time.Parse(time.RFC3339, sinceISO)
+	if err != nil {
+		return "unknown"
+	}
+	d := now.Sub(since).Round(time.Minute)
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if hours <= 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dh %02dm", hours, minutes)
+}
+
+// formatStatusReply builds the /status reply: one business-level line per
+// target using this run's fresh results (status, latency) and state
+// (since, for the up/down-for duration).
+func formatStatusReply(targets []Target, state State, results map[string]checkResult, now time.Time) string {
+	lines := []string{fmt.Sprintf("\U0001F4CA Status — %s", now.Format("2006-01-02 15:04 UTC"))}
+	for _, t := range targets {
+		ts := state.Targets[t.Name]
+		result := results[t.Name]
+		duration := formatDurationHM(ts.Since, now)
+
+		if ts.Status == "down" {
+			lines = append(lines, fmt.Sprintf("❌ %s — down (%s) · down for %s", t.Name, shortDownReason(result.detail), duration))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("✅ %s — up · %d ms · up for %s", t.Name, result.latency.Milliseconds(), duration))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// pollStatusCommand checks for a /status command posted to the Telegram
+// group since the last processed update, and if found replies once with
+// this run's status summary. It always advances state.LastUpdateID past
+// whatever updates it saw, even when no command matched, so old messages
+// are never re-answered.
+func pollStatusCommand(state *State, targets []Target, results map[string]checkResult, now time.Time) {
+	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
+	if os.Getenv("TELEGRAM_BOT_TOKEN") == "" || chatIDStr == "" {
+		return
+	}
+	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Telegram status poll skipped: invalid TELEGRAM_CHAT_ID: %v\n", err)
+		return
+	}
+
+	updates, err := getUpdates(state.LastUpdateID + 1)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Telegram getUpdates failed: %v\n", err)
+		return
+	}
+
+	msg, maxUpdateID, found := findStatusCommand(updates, chatID)
+	if maxUpdateID > 0 {
+		state.LastUpdateID = maxUpdateID
+	}
+	if found {
+		sendTelegramMessage(formatStatusReply(targets, *state, results, now), msg.MessageID)
+	}
+}
+
 func loadTargets() ([]Target, error) {
 	data, err := os.ReadFile(targetsFile)
 	if err != nil {
@@ -218,13 +382,16 @@ func run() {
 		state = State{Targets: map[string]TargetState{}}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	nowTime := time.Now().UTC()
+	now := nowTime.Format(time.RFC3339)
 	state.CheckedAt = now
 
 	var firstSeen []firstSeenEntry
+	results := map[string]checkResult{}
 
 	for _, target := range targets {
 		result := checkTarget(target)
+		results[target.Name] = result
 		newStatus := "down"
 		if result.ok {
 			newStatus = "up"
@@ -252,6 +419,8 @@ func run() {
 	if len(firstSeen) > 0 {
 		sendTelegram(formatFirstSeenSummary(firstSeen, len(targets)))
 	}
+
+	pollStatusCommand(&state, targets, results, nowTime)
 
 	if err := saveState(state); err != nil {
 		fmt.Fprintf(os.Stderr, "Uptime check failed unexpectedly: %v\n", err)
