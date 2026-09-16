@@ -1,6 +1,7 @@
 {
   "build": {
-    "builder": "DOCKERFILE"
+    "builder": "DOCKERFILE",
+    "watchPatterns": ["**", "!watchdog-state.json"]
   },
   "deploy": {
     "restartPolicyType": "ALWAYS",
