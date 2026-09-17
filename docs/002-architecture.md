@@ -133,8 +133,8 @@ old ~5-minute GitHub cron cadence.
   results — never a stale/cached status:
   ```
   📊 Status — 2026-09-16 18:40 UTC
-  ✅ Proof of Life (staging) — up · 212 ms · up for 3h 12m
-  ❌ Proof of Life — down (404) · down for 1h 05m
+  ✅ Wavly (staging) — up · 212 ms · up for 3h 12m
+  ❌ Wavly — down (404) · down for 1h 05m
   ❌ Unsub — down (timeout) · down for 1h 05m
   ```
   Response time (`212 ms`) is measured around the HTTP call in

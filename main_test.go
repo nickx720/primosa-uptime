@@ -142,26 +142,26 @@ func TestCycleGuard_SkipsWhenBusy(t *testing.T) {
 func TestFormatStatusReply(t *testing.T) {
 	now := time.Date(2026, 9, 16, 18, 40, 0, 0, time.UTC)
 	targets := []Target{
-		{Name: "Proof of Life (staging)", URL: "https://pol-stg.primosa.ai/health"},
-		{Name: "Proof of Life", URL: "https://pol.primosa.ai/health"},
+		{Name: "Wavly (staging)", URL: "https://wavly-stg.primosa.ai/health"},
+		{Name: "Wavly", URL: "https://wavly.primosa.ai/health"},
 		{Name: "Unsub", URL: "https://unsub.primosa.ai/healthz"},
 	}
 	state := State{Targets: map[string]TargetState{
-		"Proof of Life (staging)": {Status: "up", Since: now.Add(-3*time.Hour - 12*time.Minute).Format(time.RFC3339)},
-		"Proof of Life":           {Status: "down", Since: now.Add(-1*time.Hour - 5*time.Minute).Format(time.RFC3339)},
-		"Unsub":                   {Status: "down", Since: now.Add(-1*time.Hour - 5*time.Minute).Format(time.RFC3339)},
+		"Wavly (staging)": {Status: "up", Since: now.Add(-3*time.Hour - 12*time.Minute).Format(time.RFC3339)},
+		"Wavly":           {Status: "down", Since: now.Add(-1*time.Hour - 5*time.Minute).Format(time.RFC3339)},
+		"Unsub":           {Status: "down", Since: now.Add(-1*time.Hour - 5*time.Minute).Format(time.RFC3339)},
 	}}
 	results := map[string]checkResult{
-		"Proof of Life (staging)": {ok: true, detail: "status 200", latency: 212 * time.Millisecond},
-		"Proof of Life":           {ok: false, detail: "status 404"},
-		"Unsub":                   {ok: false, detail: "timeout"},
+		"Wavly (staging)": {ok: true, detail: "status 200", latency: 212 * time.Millisecond},
+		"Wavly":           {ok: false, detail: "status 404"},
+		"Unsub":           {ok: false, detail: "timeout"},
 	}
 
 	got := formatStatusReply(targets, state, results, now)
 	want := strings.Join([]string{
 		"\U0001F4CA Status — 2026-09-16 18:40 UTC",
-		"✅ Proof of Life (staging) — up · 212 ms · up for 3h 12m",
-		"❌ Proof of Life — down (404) · down for 1h 05m",
+		"✅ Wavly (staging) — up · 212 ms · up for 3h 12m",
+		"❌ Wavly — down (404) · down for 1h 05m",
 		"❌ Unsub — down (timeout) · down for 1h 05m",
 	}, "\n")
 

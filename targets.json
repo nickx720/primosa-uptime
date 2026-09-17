@@ -1,7 +1,7 @@
 [
   {
-    "name": "Proof of Life (staging)",
-    "url": "https://pol-stg.primosa.ai/health",
+    "name": "Wavly (staging)",
+    "url": "https://wavly-stg.primosa.ai/health",
     "expect": 200
   },
   {

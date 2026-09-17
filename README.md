@@ -37,7 +37,7 @@ drops it from `state.json` on the next cycle. To park a target without
 deleting it, set `"enabled": false` (JSON has no comments) — it is
 skipped and pruned from state.
 
-`pol.primosa.ai` (Proof of Life production) is intentionally absent until prod
+`wavly.primosa.ai` (Wavly production) is intentionally absent until prod
 is promoted; re-add it then.
 
 ## Set up the Telegram bots
@@ -73,8 +73,8 @@ cycle's fresh check results:
 
 ```
 📊 Status — 2026-09-16 18:40 UTC
-✅ Proof of Life (staging) — up · 212 ms · up for 3h 12m
-❌ Proof of Life — down (404) · down for 1h 05m
+✅ Wavly (staging) — up · 212 ms · up for 3h 12m
+❌ Wavly — down (404) · down for 1h 05m
 ❌ Unsub — down (timeout) · down for 1h 05m
 ```
 
